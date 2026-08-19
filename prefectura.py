@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 from sqlalchemy import text
 import streamlit as st
+import streamlit.components.v1 as components
 from Conexion import obtener_conexion
 
 # ==============================================================================
@@ -42,13 +43,45 @@ def app_prefectura():
         st.session_state['nombre'] = ''
         st.session_state['puesto'] = ''
 
-    # Inicialización de estados para los widgets y flujo de reinicio
     if 'alumnos_reporte_sel' not in st.session_state:
         st.session_state['alumnos_reporte_sel'] = []
 
-    if 'reset_alumnos' not in st.session_state:
-        st.session_state['reset_alumnos'] = False
+    # ------------------------------------------------------------------
+    # PANTALLA LIMPIA DE CONFIRMACIÓN Y CIERRE DE SESIÓN
+    # ------------------------------------------------------------------
+    if st.session_state.get('reporte_guardado', False):
+        st.success(
+            f"✅ **¡Reporte Guardado con Éxito!**\n\n"
+            f"Se registraron **{st.session_state.get('res_cant', 0)}** reporte(s) en **{st.session_state.get('res_lugar', '')}**."
+        )
+        st.warning('🔒 **La sesión se va a cerrar por seguridad.** Puedes cerrar esta pestaña.')
 
+        # Intentar cerrar la pestaña mediante JS
+        components.html(
+            """
+            <script>
+                setTimeout(function() {
+                    window.close();
+                }, 1200);
+            </script>
+            """,
+            height=0,
+        )
+
+        # Se limpian todas las variables de sesión e invalida el login
+        st.session_state['gestor_autenticado'] = False
+        st.session_state['idGestor'] = None
+        st.session_state['nombre'] = ''
+        st.session_state['puesto'] = ''
+        st.session_state['alumnos_reporte_sel'] = []
+        st.session_state['reporte_guardado'] = False
+
+        # Detiene la ejecución para no mostrar más controles en pantalla
+        st.stop()
+
+    # ------------------------------------------------------------------
+    # ACCESO AL SISTEMA (LOGIN)
+    # ------------------------------------------------------------------
     if not st.session_state['gestor_autenticado']:
         st.subheader('🔐 Acceso a Prefectura')
 
@@ -79,6 +112,7 @@ def app_prefectura():
                                 st.session_state['idGestor'] = res.idGestor
                                 st.session_state['nombre'] = res.nombre
                                 st.session_state['puesto'] = res.puesto
+                                st.session_state['alumnos_reporte_sel'] = []
                                 st.rerun()
                             else:
                                 st.error('❌ Contraseña incorrecta.')
@@ -99,6 +133,7 @@ def app_prefectura():
     with col_logout:
         if st.button('🔒 Salir', use_container_width=True):
             st.session_state['gestor_autenticado'] = False
+            st.session_state['alumnos_reporte_sel'] = []
             st.rerun()
 
     st.divider()
@@ -134,11 +169,6 @@ def app_prefectura():
         # A. Selección de Alumnos
         st.subheader('1️⃣ Selección de Alumnos')
 
-        # Si venimos de guardar un reporte, limpiamos la selección ANTES de instanciar el widget
-        if st.session_state.get('reset_alumnos'):
-            st.session_state['alumnos_reporte_sel'] = []
-            st.session_state['reset_alumnos'] = False
-
         # Filtro multiselección por Grupo(s)
         grupos_sel = st.multiselect(
             '🏫 Filtrar por Grupo(s):',
@@ -154,7 +184,7 @@ def app_prefectura():
 
         ids_filtrados = df_filtrado['idalumno'].tolist()
 
-        # Combinar opciones manteniendo el orden alfabético original de df_alumnos_base
+        # Combinar opciones manteniendo el orden alfabético original
         ids_totales_set = set(
             ids_filtrados + st.session_state['alumnos_reporte_sel']
         )
@@ -168,7 +198,7 @@ def app_prefectura():
             zip(df_alumnos_base['idalumno'], df_alumnos_base['etiqueta'])
         )
 
-        # Multiselect de Alumnos (Sin parámetro 'default' para evitar conflicto con 'key')
+        # Multiselect de Alumnos
         alumnos_seleccionados = st.multiselect(
             '👥 Selecciona el/los Alumno(s) a reportar:',
             options=opciones_disponibles,
@@ -210,7 +240,7 @@ def app_prefectura():
 
         st.divider()
 
-        # C. Registro en Base de Datos
+        # C. Registro en Base de Datos y Salida Limpia
         if st.button(
             '📝 Guardar Reporte en Prefectura',
             type='primary',
@@ -241,14 +271,12 @@ def app_prefectura():
                             },
                         )
 
-                # Notificación flotante de confirmación
-                st.toast(
-                    f'✅ ¡Éxito! Se registraron {len(alumnos_seleccionados)} reporte(s) en {lugar_sel}.',
-                    icon='🎉'
-                )
+                # Guardamos la información del resultado y activamos la bandera
+                st.session_state['res_cant'] = len(alumnos_seleccionados)
+                st.session_state['res_lugar'] = lugar_sel
+                st.session_state['reporte_guardado'] = True
 
-                # Activamos la bandera para limpiar la lista en el siguiente renderizado y recargamos
-                st.session_state['reset_alumnos'] = True
+                # Forzamos la recarga para que el script dibuje únicamente la pantalla de salida
                 st.rerun()
 
     except Exception as err:
